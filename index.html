@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MQTT 八方向控制面板 (broker.mqttgo.io)</title>
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <style>
+    :root { --bg:#0b1220; --card:#121a2b; --txt:#e9eefc; --muted:#9fb0d7; --accent:#4da3ff; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Noto Sans TC", Helvetica, Arial; background:linear-gradient(180deg, #0b1220, #0f1530); color:var(--txt); }
+    header { padding:20px; text-align:center; }
+    h1 { margin:0 0 6px; font-size:22px; }
+    .container { max-width:1100px; margin:0 auto; padding:12px; display:grid; grid-template-columns: 1.25fr 1fr; gap:16px; }
+    .card { background:var(--card); border:1px solid #223055; border-radius:16px; padding:14px; box-shadow: 0 10px 24px rgba(0,0,0,.25); }
+    .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    label { font-size:12px; color:var(--muted); }
+    input, select { background:#0b1330; color:var(--txt); border:1px solid #2b3b66; border-radius:10px; padding:8px 10px; outline:none; }
+    input[type="checkbox"]{ width:auto; }
+    button { cursor:pointer; border:1px solid #2b3b66; background:#0c1840; color:var(--txt); padding:10px 14px; border-radius:12px; font-weight:600; transition:.15s transform ease, .15s background ease; }
+    button:hover{ background:#12235f; }
+    button:active{ transform: translateY(1px) scale(0.99); }
+    button.primary{ background: linear-gradient(180deg, #1a56ff, #1748cc); border-color:#1748cc; }
+    button.danger{ background: linear-gradient(180deg, #b71c1c, #8b1212); border-color:#8b1212; }
+    .status { font-size:12px; color:var(--muted); margin-left:auto; display:flex; align-items:center; gap:8px; }
+    .dot { width:10px; height:10px; border-radius:50%; display:inline-block; background:#555; }
+    .dot.ok{ background:#29d398; }
+    .dot.warn{ background:#ffcd29; }
+    .dot.err{ background:#ff5e57; }
+    .grid { display:grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 90px); gap:12px; }
+    .pad { background:#0c1840; border:1px dashed #2b3b66; border-radius:16px; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:18px; letter-spacing:2px; color:#cfe0ff; }
+    .pad span.small { font-size:12px; font-weight:600; color:#9fb0d7; display:block; margin-top:4px; letter-spacing:0; }
+    .pad button { width:100%; height:100%; background:transparent; border:0; color:inherit; font:inherit; cursor:pointer; border-radius:16px; }
+    .grid .empty { visibility:hidden; }
+    .log { height:260px; overflow:auto; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; background:#0b1330; border:1px solid #2b3b66; border-radius:12px; padding:10px; }
+    .kbd { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size:12px; background:#0b1330; border:1px solid #2b3b66; padding:2px 6px; border-radius:6px; }
+    .footer { text-align:center; font-size:12px; color:#9fb0d7; padding:10px 0 18px; }
+    .pill { display:inline-flex; align-items:center; gap:6px; border:1px solid #2b3b66; background:#0b1330; color:#e9eefc; border-radius:999px; padding:6px 10px; font-size:12px; }
+    .topic-badge { display:inline-block; margin:4px 6px 0 0; padding:4px 8px; border-radius:999px; background:#0c1840; border:1px solid #2b3b66; font-size:12px; color:#cfe0ff; }
+    @media (max-width: 980px){ .container{ grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>MQTT 八方向控制面板</h1>
+    <div>Broker：<span class="kbd">broker.mqttgo.io</span> ｜ 快速發送：數字鍵 1~8、方向鍵（↑=1 →=2 ↓=3 ←=4）</div>
+  </header>
+  <main class="container">
+    <section class="card">
+      <div class="row" style="gap:12px; margin-bottom:10px;">
+        <label>協定</label>
+        <select id="protocol">
+          <option value="wss">wss</option>
+          <option value="ws">ws</option>
+        </select>
+        <label>主機</label>
+        <input id="host" value="broker.mqttgo.io" />
+        <label>埠號</label>
+        <input id="port" value="8084" />
+        <label>路徑</label>
+        <input id="path" value="/mqtt" />
+      </div>
+      <div class="row">
+        <label>Client ID</label>
+        <input id="clientId" />
+        <label>清除會話</label>
+        <input type="checkbox" id="clean" checked />
+        <label>Keepalive (秒)</label>
+        <input id="keepalive" type="number" value="60" />
+        <div class="status" id="status"><span class="dot" id="dot"></span><span id="statusText">未連線</span></div>
+      </div>
+      <div class="row">
+        <button class="primary" id="btnConnect">連線</button>
+        <button class="danger" id="btnDisconnect" disabled>中斷</button>
+        <span class="pill">WS URL 預覽：<span id="wsPreview" class="kbd"></span></span>
+      </div>
+      <div class="row">
+        <label>發佈主題</label>
+        <input id="pubTopic" value="shunliang/motor" />
+        <label>QoS</label>
+        <select id="qos"><option value="0">0</option><option value="1">1</option></select>
+        <label><input type="checkbox" id="retain"> retain</label>
+      </div>
+      <div class="row">
+        <label>監看主題（逗號分隔可多個）</label>
+        <input id="subTopics" />
+        <button id="btnSubscribe">訂閱</button>
+        <button id="btnUnsubscribe">退訂</button>
+      </div>
+      <div id="subList"></div>
+      <div class="log" id="log"></div>
+    </section>
+    <section class="card">
+      <div class="grid">
+        <div class="pad"><button data-payload="7">左前</button></div>
+        <div class="pad"><button data-payload="1">前</button></div>
+        <div class="pad"><button data-payload="5">右前</button></div>
+        <div class="pad"><button data-payload="4">左</button></div>
+        <div class="pad empty"></div>
+        <div class="pad"><button data-payload="2">右</button></div>
+        <div class="pad"><button data-payload="8">左後</button></div>
+        <div class="pad"><button data-payload="3">後</button></div>
+        <div class="pad"><button data-payload="6">右後</button></div>
+      </div>
+    </section>
+  </main>
+  <div class="footer">Made with MQTT.js</div>
+  <script>
+    const $ = s => document.querySelector(s);
+    const logEl = $('#log');
+    function log(m){ logEl.innerHTML = new Date().toLocaleTimeString()+' '+m+'<br>'+logEl.innerHTML; }
+    function setStatus(t,c){ $('#statusText').textContent=t; $('#dot').className='dot '+(c||''); }
+    function vibrateOk(){ if(navigator.vibrate) navigator.vibrate(30); }
+    $('#clientId').value = `web-${Math.random().toString(16).slice(2,10)}`;
+    function buildUrl(){ return `${$('#protocol').value}://${$('#host').value}:${$('#port').value}${$('#path').value}`; }
+    function refreshPreview(){ $('#wsPreview').textContent=buildUrl(); }
+    ['protocol','host','port','path'].forEach(id=>$('#'+id).addEventListener('input',refreshPreview)); refreshPreview();
+    let client=null;
+    $('#btnConnect').onclick=()=>{
+      if(client) client.end(true);
+      client=mqtt.connect(buildUrl(),{clientId:$('#clientId').value,clean:$('#clean').checked,keepalive:parseInt($('#keepalive').value)});
+      client.on('connect',()=>{setStatus('已連線','ok');$('#btnDisconnect').disabled=false;log('✔ 已連線');});
+      client.on('close',()=>{setStatus('未連線','');$('#btnDisconnect').disabled=true;log('✖ 連線關閉');});
+      client.on('error',err=>{setStatus('錯誤','err');log('❗ '+err.message);});
+      client.on('message',(t,p)=>log(`← ${t} ${p}`));
+    };
+    $('#btnDisconnect').onclick=()=>{ if(client) client.end(true); };
+    $('#btnSubscribe').onclick=()=>{ if(client&&client.connected){ $('#subTopics').value.split(',').forEach(tp=>{client.subscribe(tp.trim());log('✔ 訂閱 '+tp.trim());});}};
+    $('#btnUnsubscribe').onclick=()=>{ if(client&&client.connected){ $('#subTopics').value.split(',').forEach(tp=>{client.unsubscribe(tp.trim());log('✔ 退訂 '+tp.trim());});}};
+    document.querySelectorAll('.pad button').forEach(b=>b.onclick=()=>{
+      if(client&&client.connected){client.publish($('#pubTopic').value,b.dataset.payload,{qos:parseInt($('#qos').value),retain:$('#retain').checked});log(`→ 發佈 ${b.dataset.payload}`);vibrateOk();}
+    });
+  </script>
+</body>
+</html>
